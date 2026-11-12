@@ -1,6 +1,6 @@
 #!/bin/sh
 # 把 torrent_client 能力（qBittorrent Web API v2）登记成 Sonarr 的下载客户端。
-# 核心按能力接线后注入 WONTON_TORRENT_CLIENT_URL（如 http://torrent-client.wonton.internal:8080），
+# 核心按能力接线后注入 WONTON_TORRENT_CLIENT_URL（别名 torrent_client.wonton.internal 加网关端口），
 # 免凭据：流量经核心别名进 qBittorrent，落在它的核心来源白名单里。
 # 每次创建容器都会重跑，必须幂等：能力没接线时说明并跳过；已有 qBittorrent 客户端时不改用户配置。
 set -eu

@@ -47,8 +47,8 @@ services:
     stop_grace_period: 30s
 
   # 一次性服务：把 torrent_client 能力（qBittorrent Web API）登记成 Sonarr 的下载客户端。
-  # 能力核心还没合入：WONTON_TORRENT_CLIENT_URL 没注入时如实说明并跳过，装得上、其他功能照常；
-  # 等能力接线走通后这里照核心定稿的字段改成必填。
+  # wants 的提供方没装时变量为空，如实说明并跳过；提供方装好后核心接上使用方、重建容器，
+  # 本服务带着注入的 WONTON_TORRENT_CLIENT_URL 重跑，登记成下载客户端。
   register-download-client:
     image: linuxserver/sonarr:4.0.20@sha256:673dc4609a5672bc8e46069c86ffcea283a86b48d34a6c93d8da8c24a1b87571
     entrypoint: ["/bin/sh", "/register-download-client.sh"]
