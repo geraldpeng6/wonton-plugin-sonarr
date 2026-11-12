@@ -39,8 +39,18 @@ sonarr_marker_get() { # <键>：标记里的单项
   sed -n "s/^$1=//p" "$m" | tail -1
 }
 
+sonarr_web() { # 网页入口：套件没导出 SMOKE_WEB_URL 时（dev.sh probes 单跑数据项）从核心地址和插件 id 拼
+  if [[ -z "${SMOKE_WEB_URL:-}" ]]; then
+    local base="${E2E_WEB_URL:-${SMOKE_BASE:?SMOKE_BASE 未导出}}"
+    base="${base%/}"
+    SMOKE_WEB_URL="${base%%://*}://${SMOKE_PLUGIN_ID//./-}.${base#*://}"
+  fi
+  printf '%s' "$SMOKE_WEB_URL"
+}
+
 sonarr_key() { # 应用的 X-Api-Key：External 认证没有登录页，initialize.json 直接给
   local page key
+  sonarr_web >/dev/null
   page="$(dweb /initialize.json)" || { echo "读 /initialize.json 失败"; return 1; }
   key="$(jq -r '.apiKey // empty' <<<"$page" 2>/dev/null)"
   [[ -n "$key" && "$key" != null ]] || { echo "initialize.json 里没有 apiKey"; return 1; }
@@ -50,7 +60,7 @@ sonarr_key() { # 应用的 X-Api-Key：External 认证没有登录页，initiali
 sonarr_session() { # 自铸核心会话：网关认出用户才转发 sso:none 应用的请求。端到端冒烟的 extra_check 和
   # 升级保数据的 data_write 都跑在套件 web_login 之前，jar 里还没有核心会话，先用主人令牌换一个。
   local web jar token base
-  web="${E2E_WEB_URL:-${SMOKE_WEB_URL:?SMOKE_WEB_URL 未导出}}"
+  web="${E2E_WEB_URL:-$(sonarr_web)}"
   web="${web%/}"
   jar="${E2E_JAR:-${SMOKE_JAR:?SMOKE_JAR 未导出}}"
   token="${E2E_TOKEN:-${SMOKE_TOKEN:-}}"
@@ -91,6 +101,7 @@ SONARR_TAG_LABEL_PREFIX="wonton-smoke"
 
 data_write() { # 建一个标签（改数据、写库），作为要保住的用户数据
   local status list old id created
+  sonarr_web >/dev/null # 命令替换是子壳，网页入口要在父壳备好
   status="$(sonarr_api_ready)" || return 1
   # External 认证下应用不再拦人；顺手确认环境变量真的把认证方式设成了 external。
   jq -e '.authentication == "external"' <<<"$status" >/dev/null ||
@@ -112,10 +123,17 @@ data_write() { # 建一个标签（改数据、写库），作为要保住的用
 }
 
 data_check() { # 升级/重装后：标记里的标签还在
-  local label list item
+  local label list item tries
   label="$(sonarr_marker_get label)"
   [[ -n "$label" ]] || { echo "标记里没有数据（data_write 没跑？）"; return 1; }
-  list="$(sonarr_api_ready)" || return 1
+  sonarr_web >/dev/null # 命令替换是子壳，网页入口要在父壳备好
+  sonarr_session || return 1
+  # 应用冷启动的头几秒 API 可能先 401，照 data_write 的就绪模式重试；要的是标签列表，不是就绪探测的状态。
+  for tries in 1 2 3 4 5 6 7 8 9 10; do
+    if list="$(sonarr_api GET tag)" && jq -e 'type == "array"' <<<"$list" >/dev/null 2>&1; then break; fi
+    [[ "$tries" == 10 ]] && { echo "读标签失败：$(head -c 200 <<<"$list")"; return 1; }
+    sleep 3
+  done
   item="$(jq -c --arg l "$label" '[.[] | select(.label == $l)][0] // empty' <<<"$list")"
   [[ -n "$item" && "$item" != null ]] || { echo "标签 $label 不见了：$(head -c 200 <<<"$list")"; return 1; }
   echo "标签 $label 还在（id=$(jq -r '.id' <<<"$item")）"
@@ -146,6 +164,7 @@ extra_check() { # 发信端到端：应用的「测试」接口真发一封通�
 	# 核心把它投进主人的「Wonton」私聊（直接读通知房的消息，投递的最终证据）。
 	local list conn resp to wp
 	to="${SMOKE_OWNER:-owner}@wonton.internal"
+	sonarr_web >/dev/null # 命令替换是子壳，网页入口要在父壳备好
 	sonarr_session || return 1
 	# 插件的一次性 mail 服务建好的 "Wonton" Email 通知连接还在：没有它就没有发信通路。
 	# 应用冷启动的头几秒 API 可能先 401，照 data_write 的就绪模式重试。
